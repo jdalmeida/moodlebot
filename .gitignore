@@ -1,0 +1,48 @@
+# Ambientes virtuais
+.venv/
+venv/
+env/
+
+# Bytecode Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Configuração local — NUNCA commitar
+.env
+.env.local
+
+# Dados persistidos da aplicação
+data/*.db
+data/*.db-journal
+data/*.db-wal
+data/*.db-shm
+data/storage_state.json
+
+# Logs
+*.log
+logs/
+
+# Playwright
+.playwright/
+playwright-report/
+test-results/
+
+# Editores
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# Coverage / build
+.coverage
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+htmlcov/
+dist/
+build/
+*.egg-info/
