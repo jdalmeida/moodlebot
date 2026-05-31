@@ -9,3 +9,4 @@ loguru>=0.7
 aiosqlite>=0.20
 beautifulsoup4>=4.12
 lxml>=5
+google-genai>=1.0,<2

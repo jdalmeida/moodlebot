@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from loguru import logger
-from telegram import Bot
+from telegram import Bot, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.constants import ParseMode
 from telegram.error import TelegramError
 
@@ -14,6 +14,16 @@ from ..telegram_bot.formatters import (
     render_notificacao_lembrete,
     render_notificacao_nova,
 )
+
+
+def _keyboard_ajudar(tarefa: Tarefa) -> InlineKeyboardMarkup:
+    """Botão único 'Me ajude' que dispara o fluxo assistido para esta tarefa."""
+    assert tarefa.id is not None
+    return InlineKeyboardMarkup([[
+        InlineKeyboardButton(
+            "🤖 Me ajude", callback_data=f"ajudar:{tarefa.id}"
+        ),
+    ]])
 
 
 def _render(t: Tarefa, tipo: TipoNotif) -> str:
@@ -52,6 +62,7 @@ async def enviar_notificacoes(
             continue
 
         texto = _render(tarefa, tipo)
+        keyboard = _keyboard_ajudar(tarefa)
         primeiro_msg_id: int | None = None
         primeiro_chat_id: int | None = None
         sucesso_em_algum = False
@@ -63,6 +74,7 @@ async def enviar_notificacoes(
                     text=texto,
                     parse_mode=ParseMode.HTML,
                     disable_web_page_preview=True,
+                    reply_markup=keyboard,
                 )
                 sucesso_em_algum = True
                 if primeiro_msg_id is None:

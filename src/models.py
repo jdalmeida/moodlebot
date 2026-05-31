@@ -39,11 +39,12 @@ class TipoNotif(StrEnum):
     LEMBRETE_2H = "lembrete_2h"
 
 
-class StatusRascunho(StrEnum):
-    GERADO = "gerado"
-    APROVADO = "aprovado"
-    REJEITADO = "rejeitado"
-    PREENCHIDO = "preenchido"
+class EstadoConversa(StrEnum):
+    """Estados da máquina de conversação por (chat_id, tarefa_id)."""
+
+    IDLE = "idle"
+    COLETANDO_CONTEXTO = "coletando_contexto"
+    REVISANDO_RASCUNHO = "revisando_rascunho"
 
 
 class Tarefa(BaseModel):
@@ -79,12 +80,23 @@ class NotificacaoEnviada(BaseModel):
 
 
 class Rascunho(BaseModel):
+    """Versão de um rascunho gerado pelo LLM para uma tarefa."""
+
     id: int | None = None
     tarefa_id: int
+    chat_id: int
+    versao: int
     conteudo: str
-    status: StatusRascunho = StatusRascunho.GERADO
-    modelo_usado: str | None = None
     prompt_usado: str | None = None
-    gerado_em: datetime | None = None
-    aprovado_em: datetime | None = None
-    preenchido_em: datetime | None = None
+    salvo_no_moodle: bool = False
+    criado_em: datetime | None = None
+
+
+class Conversa(BaseModel):
+    """Estado vivo da assistência por (chat_id, tarefa_id)."""
+
+    chat_id: int
+    tarefa_id: int
+    estado: EstadoConversa = EstadoConversa.IDLE
+    contexto_json: str | None = None
+    atualizado_em: datetime | None = None

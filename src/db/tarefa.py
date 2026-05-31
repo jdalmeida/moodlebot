@@ -1,106 +1,21 @@
-"""Camada de banco — aiosqlite + DDL + DAOs finos.
+"""DAOs de tarefas e notificações.
 
 Decisões:
-- Uma conexão única por processo, protegida por asyncio.Lock no `get_db()`.
-  SQLite serializa escritas internamente; com WAL múltiplos leitores cabem.
-  Para a carga desta aplicação (um tick a cada 15min + handlers raros do
-  Telegram) uma conexão chega de sobra.
 - Datas armazenadas como TEXT ISO-8601 UTC. Conversão na fronteira do DAO.
-- `row_factory = aiosqlite.Row` para acesso por nome.
+- Confiamos em UNIQUE constraints para idempotência (não tentamos detectar
+  duplicação por comparação de timestamps).
 """
 
 from __future__ import annotations
 
-import asyncio
 from collections.abc import Iterable
 from datetime import datetime, timezone
 from typing import Any
 
 import aiosqlite
-from loguru import logger
 
-from .config import settings
-from .models import StatusTarefa, Tarefa, TipoNotif, TipoTarefa
-
-
-SCHEMA_SQL = """
-CREATE TABLE IF NOT EXISTS tarefas (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    moodle_id TEXT NOT NULL UNIQUE,
-    tipo TEXT NOT NULL,
-    curso TEXT NOT NULL,
-    titulo TEXT NOT NULL,
-    url TEXT NOT NULL,
-    prazo TEXT,
-    descricao TEXT,
-    status TEXT NOT NULL DEFAULT 'pendente',
-    primeira_visualizacao TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
-    atualizado_em TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
-);
-CREATE INDEX IF NOT EXISTS idx_tarefas_status ON tarefas(status);
-CREATE INDEX IF NOT EXISTS idx_tarefas_prazo  ON tarefas(prazo);
-
-CREATE TABLE IF NOT EXISTS notificacoes_enviadas (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    tarefa_id INTEGER NOT NULL REFERENCES tarefas(id) ON DELETE CASCADE,
-    tipo_notif TEXT NOT NULL
-        CHECK(tipo_notif IN ('nova','lembrete_24h','lembrete_2h')),
-    enviado_em TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
-    telegram_chat_id INTEGER,
-    telegram_message_id INTEGER,
-    UNIQUE(tarefa_id, tipo_notif)
-);
-
-CREATE TABLE IF NOT EXISTS rascunhos (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    tarefa_id INTEGER NOT NULL REFERENCES tarefas(id) ON DELETE CASCADE,
-    conteudo TEXT NOT NULL,
-    status TEXT NOT NULL DEFAULT 'gerado'
-        CHECK(status IN ('gerado','aprovado','rejeitado','preenchido')),
-    modelo_usado TEXT,
-    prompt_usado TEXT,
-    gerado_em TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
-    aprovado_em TEXT,
-    preenchido_em TEXT
-);
-CREATE INDEX IF NOT EXISTS idx_rascunhos_tarefa ON rascunhos(tarefa_id);
-"""
-
-
-_conn: aiosqlite.Connection | None = None
-_conn_lock = asyncio.Lock()
-
-
-async def get_db() -> aiosqlite.Connection:
-    """Retorna a conexão singleton, abrindo-a sob demanda."""
-    global _conn
-    async with _conn_lock:
-        if _conn is None:
-            settings.database_path.parent.mkdir(parents=True, exist_ok=True)
-            conn = await aiosqlite.connect(settings.database_path)
-            conn.row_factory = aiosqlite.Row
-            await conn.execute("PRAGMA foreign_keys = ON")
-            await conn.execute("PRAGMA journal_mode = WAL")
-            await conn.commit()
-            _conn = conn
-            logger.debug("Conexão SQLite aberta em {}", settings.database_path)
-        return _conn
-
-
-async def close_db() -> None:
-    global _conn
-    async with _conn_lock:
-        if _conn is not None:
-            await _conn.close()
-            _conn = None
-
-
-async def init_schema() -> None:
-    """Cria as tabelas se não existirem. Idempotente."""
-    conn = await get_db()
-    await conn.executescript(SCHEMA_SQL)
-    await conn.commit()
-    logger.info("Schema SQLite inicializado em {}", settings.database_path)
+from ..models import StatusTarefa, Tarefa, TipoNotif, TipoTarefa
+from .conn import get_db
 
 
 # --------------------------------------------------------------------------- #
@@ -206,6 +121,14 @@ async def list_tarefas_pendentes() -> list[Tarefa]:
     async with conn.execute(sql) as cur:
         rows = await cur.fetchall()
     return [_row_to_tarefa(r) for r in rows]
+
+
+async def get_tarefa(tarefa_id: int) -> Tarefa | None:
+    """Busca uma tarefa pelo id interno."""
+    conn = await get_db()
+    async with conn.execute("SELECT * FROM tarefas WHERE id = ?", (tarefa_id,)) as cur:
+        row = await cur.fetchone()
+    return _row_to_tarefa(row) if row else None
 
 
 async def tarefas_pendentes_sem_notif_nova() -> list[Tarefa]:

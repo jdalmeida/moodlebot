@@ -1,75 +1,41 @@
-"""Construção do bot Telegram.
+"""Construção da `Application` Telegram.
 
 Decisão: usamos long polling (`run_polling`) em vez de webhook. Sem expor
 endpoint HTTP, o bot pode rodar atrás de NAT em qualquer máquina (inclusive
 no notebook da universidade).
+
+Os handlers vivem em `handlers.py` — este módulo é só o factory.
 """
 
 from __future__ import annotations
 
-import time
 from collections.abc import Awaitable, Callable
-from datetime import datetime, timezone
 
 from loguru import logger
-from telegram import Update
-from telegram.constants import ParseMode
 from telegram.ext import (
     Application,
     ApplicationBuilder,
+    CallbackQueryHandler,
     CommandHandler,
-    ContextTypes,
+    MessageHandler,
+    filters,
 )
 
 from ..config import settings
-from ..db import list_tarefas_pendentes
-from .auth import require_allowed_user
-from .formatters import render_lista
+from .handlers import (
+    callback_ajudar,
+    callback_descartar,
+    callback_rascunhar,
+    callback_refazer,
+    callback_salvar,
+    cmd_ping,
+    cmd_start,
+    cmd_tarefas,
+    handle_mensagem_refinamento,
+)
 
 
 PostHook = Callable[[Application], Awaitable[None]]
-
-
-_START_TIME = time.monotonic()
-
-
-@require_allowed_user
-async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    assert update.effective_chat is not None
-    msg = (
-        "👋 <b>Moodlebot</b> — monitor de tarefas do Moodle\n\n"
-        "Comandos disponíveis:\n"
-        "• /ping — verifica se estou vivo\n"
-        "• /tarefas — lista tarefas pendentes\n"
-    )
-    await context.bot.send_message(
-        chat_id=update.effective_chat.id, text=msg, parse_mode=ParseMode.HTML
-    )
-
-
-@require_allowed_user
-async def cmd_ping(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    assert update.effective_chat is not None
-    uptime_s = int(time.monotonic() - _START_TIME)
-    now = datetime.now(timezone.utc).astimezone().strftime("%Y-%m-%d %H:%M:%S %z")
-    await context.bot.send_message(
-        chat_id=update.effective_chat.id,
-        text=f"pong\nuptime: {uptime_s}s\nagora: {now}",
-    )
-
-
-@require_allowed_user
-async def cmd_tarefas(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    assert update.effective_chat is not None
-    chat_id = update.effective_chat.id
-    tarefas = await list_tarefas_pendentes()
-    for chunk in render_lista(tarefas):
-        await context.bot.send_message(
-            chat_id=chat_id,
-            text=chunk,
-            parse_mode=ParseMode.HTML,
-            disable_web_page_preview=True,
-        )
 
 
 def build_application(
@@ -91,7 +57,23 @@ def build_application(
     if post_shutdown is not None:
         builder = builder.post_shutdown(post_shutdown)
     app = builder.build()
+
+    # Comandos slash
     app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(CommandHandler("ping", cmd_ping))
     app.add_handler(CommandHandler("tarefas", cmd_tarefas))
+
+    # Callbacks da máquina de assistência. Pattern restrito a `^<verbo>:\d+$`
+    # impede colisão com mensagens espúrias e bloqueia callback_data malformado.
+    app.add_handler(CallbackQueryHandler(callback_ajudar,    pattern=r"^ajudar:\d+$"))
+    app.add_handler(CallbackQueryHandler(callback_rascunhar, pattern=r"^rascunhar:\d+$"))
+    app.add_handler(CallbackQueryHandler(callback_salvar,    pattern=r"^salvar:\d+$"))
+    app.add_handler(CallbackQueryHandler(callback_descartar, pattern=r"^descartar:\d+$"))
+    app.add_handler(CallbackQueryHandler(callback_refazer,   pattern=r"^refazer:\d+$"))
+
+    # Texto livre (não-comando) durante revisão = pedido de refino.
+    app.add_handler(
+        MessageHandler(filters.TEXT & ~filters.COMMAND, handle_mensagem_refinamento)
+    )
+
     return app

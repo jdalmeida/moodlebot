@@ -13,7 +13,6 @@ from typing import Annotated
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
-
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 
@@ -25,6 +24,12 @@ class Settings(BaseSettings):
         env_file_encoding="utf-8",
         case_sensitive=False,
         extra="ignore",
+    )
+
+    # --- Execução ---
+    run_mode: str = Field(
+        default="telegram",
+        description="Modo de execução: 'telegram' (bot) ou 'terminal' (REPL interativo).",
     )
 
     # --- Moodle ---
@@ -66,6 +71,31 @@ class Settings(BaseSettings):
     # --- Scheduler ---
     poll_interval_minutes: int = Field(default=15, ge=1, le=60 * 24)
     log_level: str = Field(default="INFO")
+
+    # --- LLM (Gemini) ---
+    google_api_key: str = Field(
+        default="", description="Chave da API do Google AI Studio (gemini)."
+    )
+    llm_model: str = Field(
+        default="gemini-3.5-flash",
+        description="ID do modelo no google-genai. Preview models exigem a SDK nova.",
+    )
+
+    # --- Submitter ---
+    # Toggle independente de MOODLE_HEADLESS — só afeta o MoodleSubmitter.
+    # Útil para observar o submitter ao vivo enquanto ajustamos seletores,
+    # sem perder o ganho de velocidade do scheduler rodando headless.
+    moodle_debug: bool = Field(default=False)
+
+    @field_validator("run_mode", mode="after")
+    @classmethod
+    def _valida_run_mode(cls, v: str) -> str:
+        v = v.strip().lower()
+        if v not in {"telegram", "terminal"}:
+            raise ValueError(
+                f"RUN_MODE inválido: {v!r} (use 'telegram' ou 'terminal')"
+            )
+        return v
 
     @field_validator("telegram_allowed_user_ids", mode="before")
     @classmethod

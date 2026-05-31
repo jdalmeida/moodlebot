@@ -1,17 +1,13 @@
 # Moodlebot
 
 Agente autônomo que monitora tarefas pendentes em uma instalação Moodle 3.10.9
-(UNISC) e notifica via Telegram. Esta fase entrega a **fundação**:
+(UNISC) e notifica via Telegram.
 
-- Sessão Moodle persistida via `storage_state` do Playwright (login institucional
-  feito uma única vez, manualmente).
+- Sessão Moodle persistida via `storage_state` do Playwright (login institucional feito uma única vez, manualmente).
 - Scraping do dashboard para extrair tarefas pendentes.
 - Bot Telegram com `/start`, `/ping`, `/tarefas`.
 - Notificações `nova`, `lembrete_24h`, `lembrete_2h` com idempotência via SQLite.
 - Scheduler (APScheduler) que faz poll periódico.
-
-LLM e preenchimento automático de respostas **não** estão nesta fase — virão
-depois que a coleta estiver validada.
 
 ## Requisitos
 
@@ -62,6 +58,21 @@ python main.py
 
 No Telegram, mande `/ping` ao seu bot — você deve receber `pong`.
 
+### Modo de execução: Telegram ou terminal
+
+A variável `RUN_MODE` no `.env` escolhe como o agente roda:
+
+- `RUN_MODE=telegram` (padrão) — roda como bot do Telegram (polling). Precisa de
+  `TELEGRAM_BOT_TOKEN` e `TELEGRAM_ALLOWED_USER_IDS`.
+- `RUN_MODE=terminal` — assistente interativo no próprio terminal (stdin/stdout),
+  sem precisar de bot/token. Coleta as tarefas, lista, e você escolhe uma para
+  gerar/refinar o rascunho e salvar no Moodle. Também dá para sobrescrever só
+  para uma execução:
+
+  ```bash
+  RUN_MODE=terminal python main.py
+  ```
+
 ## Estrutura
 
 ```
@@ -92,7 +103,7 @@ moodlebot/
 
 ## Comandos do bot
 
-| Comando    | Descrição                                                   |
+| Comando   | Descrição                                                   |
 |-----------|-------------------------------------------------------------|
 | `/start`  | Mensagem de boas-vindas e lista de comandos.                |
 | `/ping`   | Verifica se o bot está vivo. Responde `pong`.               |

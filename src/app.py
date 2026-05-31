@@ -23,6 +23,7 @@ import asyncio
 from loguru import logger
 from telegram.ext import Application
 
+from .agent.drafter import Drafter
 from .config import settings
 from .db import close_db, init_schema
 from .logging_setup import setup_logging
@@ -52,9 +53,13 @@ async def _post_init(app: Application) -> None:
         "Scheduler iniciado (intervalo: {} min)", settings.poll_interval_minutes
     )
 
-    # Guardar referências no bot_data para shutdown limpo
+    # Drafter (Gemini). Erra cedo se GOOGLE_API_KEY não estiver configurado.
+    drafter = Drafter(api_key=settings.google_api_key, model=settings.llm_model)
+
+    # Guardar referências no bot_data para handlers e shutdown limpo.
     app.bot_data["moodle_session"] = session
     app.bot_data["scheduler"] = scheduler
+    app.bot_data["drafter"] = drafter
 
 
 async def _post_shutdown(app: Application) -> None:
@@ -73,7 +78,15 @@ async def _post_shutdown(app: Application) -> None:
 def run() -> None:
     """Ponto de entrada síncrono — `run_polling` administra o loop."""
     setup_logging()
-    logger.info("Iniciando Moodlebot…")
+    logger.info("Iniciando Moodlebot… (modo: {})", settings.run_mode)
+
+    if settings.run_mode == "terminal":
+        # Import lazy (mesma razão do build_application abaixo): mantém o
+        # setup_logging rodando antes de qualquer import pesado.
+        from .terminal.runner import run_terminal
+
+        asyncio.run(run_terminal())
+        return
 
     # Importa aqui (em vez de no topo) para que `setup_logging` rode antes,
     # garantindo que logs do PTB respeitem o nível configurado.
