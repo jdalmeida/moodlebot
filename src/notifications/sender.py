@@ -17,11 +17,11 @@ from ..telegram_bot.formatters import (
 
 
 def _keyboard_ajudar(tarefa: Tarefa) -> InlineKeyboardMarkup:
-    """Botão único 'Me ajude' que dispara o fluxo assistido para esta tarefa."""
+    """Botão 'Orientar' que dispara o agente de orientação para esta tarefa."""
     assert tarefa.id is not None
     return InlineKeyboardMarkup([[
         InlineKeyboardButton(
-            "🤖 Me ajude", callback_data=f"ajudar:{tarefa.id}"
+            "🧭 Orientar", callback_data=f"orientar:{tarefa.id}"
         ),
     ]])
 

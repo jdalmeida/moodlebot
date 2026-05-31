@@ -66,8 +66,8 @@ A variável `RUN_MODE` no `.env` escolhe como o agente roda:
   `TELEGRAM_BOT_TOKEN` e `TELEGRAM_ALLOWED_USER_IDS`.
 - `RUN_MODE=terminal` — assistente interativo no próprio terminal (stdin/stdout),
   sem precisar de bot/token. Coleta as tarefas, lista, e você escolhe uma para
-  gerar/refinar o rascunho e salvar no Moodle. Também dá para sobrescrever só
-  para uma execução:
+  o agente **orientar** (ler enunciado + materiais e montar um roteiro de como
+  resolver). Também dá para sobrescrever só para uma execução:
 
   ```bash
   RUN_MODE=terminal python main.py
@@ -87,9 +87,13 @@ moodlebot/
 │   ├── db.py                # aiosqlite + DAOs
 │   ├── models.py            # pydantic models
 │   ├── logging_setup.py     # loguru
+│   ├── agent/
+│   │   ├── orientador.py    # Agente: loop de function-calling (Gemini)
+│   │   └── tools.py         # Ferramentas Moodle expostas ao modelo
 │   ├── moodle/
 │   │   ├── session.py       # Playwright + storage_state
-│   │   └── scraper.py       # Parser do dashboard
+│   │   ├── scraper.py       # Parser do dashboard
+│   │   └── reader.py        # Lê curso/atividade + baixa e extrai materiais
 │   ├── notifications/
 │   │   ├── policy.py        # Regras de envio
 │   │   └── sender.py        # Telegram + persistência
@@ -111,6 +115,11 @@ moodlebot/
 
 Apenas IDs presentes em `TELEGRAM_ALLOWED_USER_IDS` recebem resposta — os
 demais são silenciosamente ignorados.
+
+Em cada notificação de tarefa há o botão **🧭 Orientar**: o agente abre a
+atividade no Moodle, lê o enunciado completo, baixa os materiais anexos
+(PDF/DOCX/PPTX) e devolve um **roteiro** de como resolver — conceitos-chave,
+materiais relevantes e passo a passo —, em vez de uma resposta pronta.
 
 ## Política de notificações
 
@@ -136,9 +145,27 @@ Resolva rodando novamente:
 python scripts/first_login.py
 ```
 
+## Agente de orientação (LLM)
+
+O agente usa o **Gemini** (`google-genai`) com *function-calling*: o modelo tem
+ferramentas para navegar no Moodle e decide sozinho quais usar para entender a
+tarefa antes de orientar.
+
+- `src/moodle/reader.py` — `obter_atividade` (enunciado/prazo/status/anexos),
+  `obter_curso`, `listar_cursos`, `baixar_arquivo` (download autenticado via a
+  mesma sessão Playwright + extração de texto de PDF/DOCX/PPTX/HTML).
+- `src/agent/tools.py` — expõe essas funções como ferramentas (somente-leitura),
+  com budget de chamadas e cache.
+- `src/agent/orientador.py` — loop manual de tool-calls e o roteiro final.
+
+Coleta **híbrida**: a cada poll, tarefas novas têm o enunciado completo lido e
+salvo automaticamente; o download pesado de materiais só roda quando você pede
+**Orientar**. Limites em `src/config.py` (`agent_max_iterations`,
+`agent_max_tool_calls`, `reader_max_download_bytes`, etc.).
+
+> Todas as ferramentas do agente são **somente-leitura** — nunca escrevem no
+> Moodle.
+
 ## Próximas fases (não implementadas)
 
-- Geração de rascunhos com LLM (Anthropic ou Gemini).
-- Preenchimento automático de respostas no Moodle (sempre como **rascunho**,
-  com aprovação humana via botões inline no Telegram).
 - Migração de SQLite para SQL Server.

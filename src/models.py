@@ -45,6 +45,7 @@ class EstadoConversa(StrEnum):
     IDLE = "idle"
     COLETANDO_CONTEXTO = "coletando_contexto"
     REVISANDO_RASCUNHO = "revisando_rascunho"
+    REVISANDO_ORIENTACAO = "revisando_orientacao"
 
 
 class Tarefa(BaseModel):

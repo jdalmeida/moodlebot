@@ -13,6 +13,8 @@ from telegram.error import TelegramError
 
 from .config import settings
 from .db import upsert_tarefa
+from .models import Tarefa
+from .moodle import reader
 from .moodle.scraper import coletar_tarefas_pendentes
 from .moodle.session import MoodleSession, SessionExpiredError
 from .notifications.policy import calcular_notificacoes_pendentes
@@ -50,15 +52,22 @@ async def tick(session: MoodleSession, bot: Bot) -> None:
         logger.info("Coletadas {} tarefa(s) do dashboard", len(tarefas))
 
         novas = 0
+        recem_criadas: list[Tarefa] = []
         for t in tarefas:
             try:
                 _, recem_criada = await upsert_tarefa(t)
                 if recem_criada:
                     novas += 1
+                    recem_criadas.append(t)
             except Exception as e:  # noqa: BLE001
                 logger.error("Falha ao salvar tarefa {!r}: {}", t.moodle_id, e)
 
         logger.info("UPSERT concluído ({} nova(s))", novas)
+
+        # Coleta híbrida: para tarefas novas sem enunciado conhecido, abre a
+        # página da atividade e grava o enunciado completo (sem baixar anexos —
+        # download pesado fica para a orientação sob demanda).
+        await _enriquecer_enunciados(session, recem_criadas)
 
         try:
             now = datetime.now(timezone.utc)
@@ -66,6 +75,27 @@ async def tick(session: MoodleSession, bot: Bot) -> None:
             await enviar_notificacoes(bot, pendentes)
         except Exception as e:  # noqa: BLE001
             logger.exception("Falha ao enviar notificações: {}", e)
+
+
+async def _enriquecer_enunciados(
+    session: MoodleSession, tarefas: list[Tarefa]
+) -> None:
+    """Para cada tarefa nova sem descrição, lê o enunciado da atividade e
+    persiste em `tarefas.descricao`. Best-effort: falhas só logam."""
+    for t in tarefas:
+        if t.descricao:
+            continue
+        try:
+            det = await reader.obter_atividade(session, str(t.url), t.tipo)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("Não consegui ler enunciado de {!r}: {}", t.titulo, e)
+            continue
+        if det.enunciado_texto:
+            t.descricao = det.enunciado_texto
+            try:
+                await upsert_tarefa(t)
+            except Exception as e:  # noqa: BLE001
+                logger.error("Falha ao gravar enunciado de {!r}: {}", t.moodle_id, e)
 
 
 # Estado para não fazer spam do aviso de sessão expirada a cada tick.

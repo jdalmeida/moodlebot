@@ -1,15 +1,14 @@
 """Modo terminal — assistente interativo via stdin/stdout.
 
 Equivalente ao fluxo do Telegram (`src/telegram_bot/handlers.py`), mas sem bot
-nem token: o usuário interage direto no terminal. Reusa exatamente as mesmas
-peças de domínio — `MoodleSession`, `coletar_tarefas_pendentes`, `upsert_tarefa`,
-`Drafter`, `MoodleSubmitter`, `RascunhoRepo` — trocando só a camada de I/O.
+nem token: o usuário interage direto no terminal. Reusa as mesmas peças de
+domínio — `MoodleSession`, `coletar_tarefas_pendentes`, `upsert_tarefa`,
+`Orientador` — trocando só a camada de I/O.
 
 Diferenças deliberadas em relação ao modo bot:
 - Sem scheduler/notificações: o humano está presente, a coleta é sob demanda.
 - Sem máquina de estado persistida (`ConversaRepo`): o estado vive em variáveis
-  locais do REPL. Os rascunhos, porém, são gravados em `rascunhos` com um
-  `chat_id` sentinela (`TERMINAL_CHAT_ID`) para manter paridade com o Telegram.
+  locais do REPL.
 """
 
 from __future__ import annotations
@@ -18,10 +17,9 @@ import asyncio
 
 from loguru import logger
 
-from ..agent.drafter import Drafter
+from ..agent.orientador import Orientador
 from ..config import settings
 from ..db import (
-    RascunhoRepo,
     close_db,
     init_schema,
     list_tarefas_pendentes,
@@ -30,12 +28,6 @@ from ..db import (
 from ..models import Tarefa
 from ..moodle.scraper import coletar_tarefas_pendentes
 from ..moodle.session import MoodleSession, SessionExpiredError
-from ..moodle.submitter import MoodleSubmitter, SubmissaoAcidentalError
-
-
-# chat_id sentinela para os rascunhos do terminal. Chats reais do Telegram são
-# positivos e não-zero, então 0 nunca colide com eles.
-TERMINAL_CHAT_ID = 0
 
 
 # --------------------------------------------------------------------------- #
@@ -48,26 +40,6 @@ async def _perguntar(prompt: str) -> str:
     return (await asyncio.to_thread(input, prompt)).strip()
 
 
-def _contexto_da_tarefa(tarefa: Tarefa) -> dict:
-    """Serializa a Tarefa em dict para alimentar o Drafter.
-
-    Espelha `_contexto_para_drafter` dos handlers do Telegram. Replicado aqui
-    (em vez de importado) para que o modo terminal não dependa do pacote
-    telegram nem dos seus imports.
-    """
-    contexto: dict = {
-        "titulo": tarefa.titulo,
-        "curso": tarefa.curso,
-        "tipo": tarefa.tipo.value,
-        "url": str(tarefa.url),
-    }
-    if tarefa.prazo:
-        contexto["prazo_iso"] = tarefa.prazo.isoformat()
-    if tarefa.descricao:
-        contexto["descricao"] = tarefa.descricao
-    return contexto
-
-
 def _imprimir_tarefa(indice: int, tarefa: Tarefa) -> None:
     prazo = tarefa.prazo.astimezone().strftime("%Y-%m-%d %H:%M") if tarefa.prazo else "—"
     print(f"  [{indice}] {tarefa.titulo}")
@@ -75,12 +47,16 @@ def _imprimir_tarefa(indice: int, tarefa: Tarefa) -> None:
     print(f"      {tarefa.url}")
 
 
-def _imprimir_rascunho(versao: int, conteudo: str) -> None:
+def _imprimir_orientacao(roteiro: str, transcript: list[str]) -> None:
     print()
-    print(f"📝 Rascunho v{versao}")
+    print("🧭 Orientação")
     print("─" * 60)
-    print(conteudo)
+    print(roteiro)
     print("─" * 60)
+    if transcript:
+        print("(ferramentas usadas:)")
+        for linha in transcript:
+            print(f"  · {linha}")
 
 
 # --------------------------------------------------------------------------- #
@@ -109,93 +85,32 @@ async def _coletar(session: MoodleSession) -> list[Tarefa]:
 # --------------------------------------------------------------------------- #
 
 
-async def _revisar_tarefa(drafter: Drafter, tarefa: Tarefa) -> None:
-    """Gera v1 e entra no sub-loop de refino/salvar/descartar para uma tarefa."""
+async def _revisar_tarefa(orientador: Orientador, tarefa: Tarefa) -> None:
+    """Gera a orientação e entra no sub-loop de re-orientar/fechar."""
     assert tarefa.id is not None
-    contexto = _contexto_da_tarefa(tarefa)
-
-    print("\n⏳ Gerando rascunho…")
-    try:
-        resultado = await drafter.gerar_rascunho(tarefa, contexto)
-    except Exception as e:  # noqa: BLE001
-        logger.exception("Falha ao gerar rascunho")
-        print(f"❌ Falhou ao gerar rascunho: {e}")
-        return
-
-    rascunho = await RascunhoRepo.criar(
-        tarefa_id=tarefa.id,
-        chat_id=TERMINAL_CHAT_ID,
-        conteudo=resultado.conteudo,
-        prompt_usado=resultado.prompt,
-    )
-    _imprimir_rascunho(rascunho.versao, rascunho.conteudo)
 
     while True:
-        print(
-            "\nComandos: [salvar] salva no Moodle | [refazer] gera nova versão | "
-            "[descartar] volta à lista"
-        )
-        print("Ou digite uma instrução de refino (texto livre).")
+        print("\n⏳ Analisando a tarefa (lendo enunciado e materiais)…")
+        try:
+            orientacao = await orientador.orientar(tarefa)
+        except SessionExpiredError:
+            raise
+        except Exception as e:  # noqa: BLE001
+            logger.exception("Falha ao orientar")
+            print(f"❌ Falhou ao gerar orientação: {e}")
+            return
+
+        _imprimir_orientacao(orientacao.roteiro, orientacao.transcript)
+
+        print("\nComandos: [orientar] gera de novo | [fechar] volta à lista")
         entrada = await _perguntar("> ")
         cmd = entrada.lower()
 
-        if not entrada:
-            continue
-
-        if cmd == "descartar":
-            print("🗑 Descartado.")
+        if cmd in ("fechar", "f", "", "q"):
             return
-
-        if cmd == "salvar":
-            print("⏳ Salvando no Moodle…")
-            submitter = MoodleSubmitter()
-            try:
-                await submitter.salvar_rascunho(str(tarefa.url), rascunho.conteudo)
-            except SubmissaoAcidentalError as e:
-                logger.error("SUBMISSÃO ACIDENTAL detectada: {}", e)
-                print(
-                    "🚨 ALERTA: o submitter detectou que a tarefa pode ter sido "
-                    "ENVIADA PARA AVALIAÇÃO em vez de salva como rascunho.\n"
-                    f"   Detalhe: {e}\n"
-                    "   Verifique no Moodle antes de prosseguir."
-                )
-                return
-            except Exception as e:  # noqa: BLE001
-                logger.exception("Falha ao salvar rascunho no Moodle")
-                print(f"❌ Falhou ao salvar no Moodle: {e}")
-                continue
-            assert rascunho.id is not None
-            await RascunhoRepo.marcar_salvo(rascunho.id)
-            print(
-                f"✅ Rascunho v{rascunho.versao} salvo no Moodle "
-                "(não enviado para avaliação)."
-            )
-            return
-
-        # 'refazer' = nova v1 do zero; texto livre = refino do rascunho atual.
-        print("⏳ Gerando…")
-        try:
-            if cmd == "refazer":
-                resultado = await drafter.gerar_rascunho(tarefa, contexto)
-            else:
-                resultado = await drafter.refinar_rascunho(
-                    anterior=rascunho.conteudo,
-                    instrucao=entrada,
-                    tarefa=tarefa,
-                    contexto=contexto,
-                )
-        except Exception as e:  # noqa: BLE001
-            logger.exception("Falha ao gerar/refinar rascunho")
-            print(f"❌ Falhou: {e}")
+        if cmd in ("orientar", "r"):
             continue
-
-        rascunho = await RascunhoRepo.criar(
-            tarefa_id=tarefa.id,
-            chat_id=TERMINAL_CHAT_ID,
-            conteudo=resultado.conteudo,
-            prompt_usado=resultado.prompt,
-        )
-        _imprimir_rascunho(rascunho.versao, rascunho.conteudo)
+        print("Comando não reconhecido — use [orientar] ou [fechar].")
 
 
 # --------------------------------------------------------------------------- #
@@ -216,7 +131,9 @@ async def run_terminal() -> None:
         await close_db()
         return
 
-    drafter = Drafter(api_key=settings.google_api_key, model=settings.llm_model)
+    orientador = Orientador(
+        api_key=settings.google_api_key, model=settings.llm_model, session=session
+    )
 
     print("\n🤖 Moodlebot — modo terminal. Digite 'q' a qualquer momento para sair.\n")
 
@@ -266,7 +183,7 @@ async def run_terminal() -> None:
                 print("Número fora do intervalo.")
                 continue
 
-            await _revisar_tarefa(drafter, tarefas[idx - 1])
+            await _revisar_tarefa(orientador, tarefas[idx - 1])
     except (KeyboardInterrupt, EOFError):
         print("\nEncerrando…")
     finally:

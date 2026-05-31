@@ -17,21 +17,15 @@ from telegram.ext import (
     ApplicationBuilder,
     CallbackQueryHandler,
     CommandHandler,
-    MessageHandler,
-    filters,
 )
 
 from ..config import settings
 from .handlers import (
-    callback_ajudar,
-    callback_descartar,
-    callback_rascunhar,
-    callback_refazer,
-    callback_salvar,
+    callback_fechar,
+    callback_orientar,
     cmd_ping,
     cmd_start,
     cmd_tarefas,
-    handle_mensagem_refinamento,
 )
 
 
@@ -63,17 +57,12 @@ def build_application(
     app.add_handler(CommandHandler("ping", cmd_ping))
     app.add_handler(CommandHandler("tarefas", cmd_tarefas))
 
-    # Callbacks da máquina de assistência. Pattern restrito a `^<verbo>:\d+$`
+    # Callbacks do fluxo de orientação. Pattern restrito a `^<verbo>:\d+$`
     # impede colisão com mensagens espúrias e bloqueia callback_data malformado.
-    app.add_handler(CallbackQueryHandler(callback_ajudar,    pattern=r"^ajudar:\d+$"))
-    app.add_handler(CallbackQueryHandler(callback_rascunhar, pattern=r"^rascunhar:\d+$"))
-    app.add_handler(CallbackQueryHandler(callback_salvar,    pattern=r"^salvar:\d+$"))
-    app.add_handler(CallbackQueryHandler(callback_descartar, pattern=r"^descartar:\d+$"))
-    app.add_handler(CallbackQueryHandler(callback_refazer,   pattern=r"^refazer:\d+$"))
-
-    # Texto livre (não-comando) durante revisão = pedido de refino.
+    # 'orientar' (da notificação) e 'reorientar' (botão) caem no mesmo handler.
     app.add_handler(
-        MessageHandler(filters.TEXT & ~filters.COMMAND, handle_mensagem_refinamento)
+        CallbackQueryHandler(callback_orientar, pattern=r"^(orientar|reorientar):\d+$")
     )
+    app.add_handler(CallbackQueryHandler(callback_fechar, pattern=r"^fechar:\d+$"))
 
     return app

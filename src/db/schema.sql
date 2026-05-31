@@ -48,11 +48,15 @@ CREATE TABLE IF NOT EXISTS rascunhos (
 CREATE INDEX IF NOT EXISTS idx_rascunhos_tarefa_versao
     ON rascunhos(tarefa_id, chat_id, versao DESC);
 
+-- Estado de conversação é efêmero (vive durante a assistência). Dropamos antes
+-- de recriar para que mudanças no CHECK de `estado` valham em bancos já criados.
+DROP TABLE IF EXISTS conversas;
+
 CREATE TABLE IF NOT EXISTS conversas (
     chat_id        INTEGER NOT NULL,
     tarefa_id      INTEGER NOT NULL REFERENCES tarefas(id) ON DELETE CASCADE,
     estado         TEXT NOT NULL DEFAULT 'idle'
-        CHECK(estado IN ('idle','coletando_contexto','revisando_rascunho')),
+        CHECK(estado IN ('idle','coletando_contexto','revisando_rascunho','revisando_orientacao')),
     contexto_json  TEXT,
     atualizado_em  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
     PRIMARY KEY (chat_id, tarefa_id)
