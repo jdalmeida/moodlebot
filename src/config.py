@@ -81,6 +81,40 @@ class Settings(BaseSettings):
         description="ID do modelo no google-genai. Preview models exigem a SDK nova.",
     )
 
+    # --- Agente (Orientador) ---
+    # Limites do loop agêntico de function-calling. Protegem contra loops
+    # infinitos do modelo e contra custo/latência explosivos.
+    agent_max_iterations: int = Field(
+        default=8,
+        ge=1,
+        le=30,
+        description="Máximo de turnos modelo↔ferramentas por orientação.",
+    )
+    agent_max_tool_calls: int = Field(
+        default=20,
+        ge=1,
+        le=100,
+        description="Teto global de chamadas de ferramenta por orientação.",
+    )
+    agent_temperature: float = Field(default=0.4, ge=0.0, le=2.0)
+
+    # --- Reader (download/extração de conteúdo) ---
+    reader_max_download_bytes: int = Field(
+        default=10_000_000,
+        ge=1,
+        description="Tamanho máximo de arquivo baixado do Moodle (bytes).",
+    )
+    reader_max_text_chars: int = Field(
+        default=40_000,
+        ge=1_000,
+        description="Limite de caracteres extraídos por arquivo.",
+    )
+    agent_tool_result_max_chars: int = Field(
+        default=12_000,
+        ge=500,
+        description="Teto de chars devolvidos ao modelo por chamada de ferramenta.",
+    )
+
     # --- Submitter ---
     # Toggle independente de MOODLE_HEADLESS — só afeta o MoodleSubmitter.
     # Útil para observar o submitter ao vivo enquanto ajustamos seletores,

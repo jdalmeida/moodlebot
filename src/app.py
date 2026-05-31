@@ -23,7 +23,7 @@ import asyncio
 from loguru import logger
 from telegram.ext import Application
 
-from .agent.drafter import Drafter
+from .agent.orientador import Orientador
 from .config import settings
 from .db import close_db, init_schema
 from .logging_setup import setup_logging
@@ -53,13 +53,17 @@ async def _post_init(app: Application) -> None:
         "Scheduler iniciado (intervalo: {} min)", settings.poll_interval_minutes
     )
 
-    # Drafter (Gemini). Erra cedo se GOOGLE_API_KEY não estiver configurado.
-    drafter = Drafter(api_key=settings.google_api_key, model=settings.llm_model)
+    # Orientador (Gemini + ferramentas Moodle). Reusa a sessão compartilhada
+    # (cada ferramenta abre/fecha sua própria página, igual ao scheduler).
+    # Erra cedo se GOOGLE_API_KEY não estiver configurado.
+    orientador = Orientador(
+        api_key=settings.google_api_key, model=settings.llm_model, session=session
+    )
 
     # Guardar referências no bot_data para handlers e shutdown limpo.
     app.bot_data["moodle_session"] = session
     app.bot_data["scheduler"] = scheduler
-    app.bot_data["drafter"] = drafter
+    app.bot_data["orientador"] = orientador
 
 
 async def _post_shutdown(app: Application) -> None:

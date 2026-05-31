@@ -19,6 +19,7 @@ from typing import Self
 
 from loguru import logger
 from playwright.async_api import (
+    APIRequestContext,
     Browser,
     BrowserContext,
     Page,
@@ -115,6 +116,17 @@ class MoodleSession:
         if self._context is None:
             raise RuntimeError("MoodleSession.start() não foi chamado")
         return await self._context.new_page()
+
+    def request_context(self) -> APIRequestContext:
+        """`APIRequestContext` da MESMA BrowserContext.
+
+        Compartilha os cookies de sessão, então `GET` em `pluginfile.php` (e
+        afins) baixa arquivos autenticados sem novo login. Usado pelo
+        `reader.baixar_arquivo`.
+        """
+        if self._context is None:
+            raise RuntimeError("MoodleSession.start() não foi chamado")
+        return self._context.request
 
     async def is_logged_in(self) -> bool:
         """Verifica se a sessão ainda está válida abrindo o dashboard.
