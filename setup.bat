@@ -189,7 +189,7 @@ if /i "!RUN_MODE!"=="telegram" (
   echo POLL_INTERVAL_MINUTES=15
   echo LOG_LEVEL=INFO
   echo GOOGLE_API_KEY=!GOOGLE_API_KEY!
-  echo LLM_MODEL=gemini-3.5-flash
+  echo LLM_MODEL=gemini-2.5-flash
   echo MOODLE_DEBUG=false
 ) > ".env"
 echo [OK] .env criado.
