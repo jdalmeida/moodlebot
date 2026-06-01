@@ -77,7 +77,7 @@ class Settings(BaseSettings):
         default="", description="Chave da API do Google AI Studio (gemini)."
     )
     llm_model: str = Field(
-        default="gemini-3.5-flash",
+        default="gemini-2.5-flash",
         description="ID do modelo no google-genai. Preview models exigem a SDK nova.",
     )
 
@@ -85,13 +85,13 @@ class Settings(BaseSettings):
     # Limites do loop agêntico de function-calling. Protegem contra loops
     # infinitos do modelo e contra custo/latência explosivos.
     agent_max_iterations: int = Field(
-        default=8,
+        default=1,
         ge=1,
         le=30,
         description="Máximo de turnos modelo↔ferramentas por orientação.",
     )
     agent_max_tool_calls: int = Field(
-        default=20,
+        default=1,
         ge=1,
         le=100,
         description="Teto global de chamadas de ferramenta por orientação.",
